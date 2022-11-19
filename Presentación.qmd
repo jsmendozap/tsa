@@ -1,0 +1,189 @@
+---
+title: "Incremento del nivel medio del mar"
+author: "Juan Sebastián Mendoza Páez"
+institute: "Estudiante Ing. Forestal"
+css: styles.css
+format:
+  revealjs:
+    code-fold: true
+    code-summary: 'Mostrar Código'
+    footer: 'Series de Tiempo Univaridas'
+    center: true
+    embed-resources: true
+    slide-number: true
+execute: 
+  cache: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T)
+```
+
+## ¿Por qué es importante? {.title}
+
+:::{.callout-note appearance="simple"} 
+
+## NASA
+"Desde 1880, el nivel del mar global ha aumentado 20 centimetros. Para el 2100 se proyecta que aumente entre 30 y 122 centimetros más."
+
+:::
+
+## Bases de datos {.title}
+
+::: {layout="[[30, 70], [100]]"}
+
+## Fuentes
+
+::: {.size}
+- Oficina Nacional de Administración Oceánica y Atmosférica (NOAA)
+- Organización de Investigación Científica e Industrial del Commonwealth (CSIRO)
+:::
+
+```{r}
+#| echo: true
+
+pacman::p_load(TSstudio, tsbox, tsoutliers, tidyverse,
+               lubridate, xts, magrittr, forecast, dygraphs)
+
+url <- 'https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.txt'
+cov <- read.table(file = url) %>%
+  select(3, 4) %>%
+  rename(fecha = 1, co2 = 2) %>%
+  mutate(fecha = date_decimal(fecha) %>%
+           floor_date(unit = 'month')) %>%
+  filter(fecha <= '2013-12-01')
+
+data <- read.csv('gmsl.csv') %>%
+  mutate(fecha = date_decimal(Time) %>%
+           floor_date(unit = 'month')) %>%
+  rename(gsml = 2) %>%
+  select(4, 2)%>%
+  filter(fecha > '1958-02-01') %>%
+  left_join(y = cov) %>%
+  {xts(x = .[,2:3], order.by = .$fecha)}
+
+rm(cov)
+
+dygraph(data, main = 'Nivel medio del mar global vs
+        Concentración de CO2 en la atmósfera') %>%
+  dySeries("co2", axis = 'y2', label = 'CO2') %>%
+  dySeries('gsml', label = 'GSML') %>%
+  dyAxis('y', label = 'Nivel del mar (mm)') %>%
+  dyAxis('y2', label = 'CO2 (ppm)', independentTicks = T) %>%
+  dyRangeSelector()
+```
+:::
+
+```{r}
+#| output: false
+
+ts_split(ts.obj = ts_ts(data), sample.out = 12) %T>%
+  {assign(x = "train", value = .$train, envir = .GlobalEnv)} %T>%
+  {assign(x = "test", value = .$test, envir = .GlobalEnv)}
+```
+
+## Estacionalidad y prueba de raíces unitarias {.title}
+
+::: {layout="[50, 50]"}
+
+```{r}
+#| echo: true
+
+acf(train[,'gsml'], main = '')
+```
+
+```{r}
+tseries::adf.test(x = train[,'gsml'])
+```
+:::
+
+## Modelo {.title}
+
+```{r}
+#| echo: true
+
+matriz_diseño <- model.matrix(~ -1 + train[,'co2'])
+colnames(matriz_diseño) <- 'co2'
+
+modelo <- Arima(y = train[,'gsml'], 
+                order = c(2,1,3),
+                xreg = matriz_diseño,
+                include.drift = T)
+
+modelo %>% lmtest::coeftest()
+```
+## Modelo {.title}
+
+```{r}
+equatiomatic::extract_eq(modelo, wrap = T, use_coefs = T)
+```
+
+## Supuestos {.title}
+
+::: columns
+
+::: {.column width="60%"}
+```{r}
+#| echo: true
+
+modelo %>%
+  checkresiduals(theme = theme_bw(), test = F)
+```
+:::
+
+::: {.column width="40%"}
+```{r}
+#| echo: true
+
+modelo %>%
+  residuals() %>%
+  shapiro.test()
+
+modelo %>%
+  residuals() %>%
+  Box.test(type = 'Ljung-Box')
+```
+:::
+
+:::
+
+## Outliers {.title}
+
+```{r}
+#| echo: true
+
+tso(y = train[,'gsml'], xreg = train[,'co2'])
+```
+
+## Predicciones {.title}
+
+::: {layout="[60, 40]" layout-valign="center"}
+
+```{r}
+#| echo: true
+#| warning: false
+
+prediccion <- forecast(object = modelo, h = 12, level = 95, xreg = test[,'co2'])
+
+serie <- prediccion %>%
+  as_tibble() %>%
+  ts(start = c(2013, 1), end = c(2013, 12), frequency = 12) %>%
+  {cbind(data[, 'gsml'], .)}
+
+colnames(serie) <- c('gsml', 'predicho', 'lwr', 'upr')
+
+serie %>%
+  dygraph() %>%
+  dySeries('gsml', label = 'Observada') %>% 
+  dySeries(c('lwr', 'predicho', 'upr'), label = 'Predicho') %>%
+  dyRangeSelector()
+```
+
+```{r}
+#| echo: true
+
+accuracy(prediccion, test[,'gsml'])[,c(2,5)]
+```
+:::
+
+## Gracias {.title}

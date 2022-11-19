@@ -11,8 +11,6 @@ format:
     center: true
     embed-resources: true
     slide-number: true
-execute: 
-  cache: true
 ---
 
 ```{r setup, include=FALSE}

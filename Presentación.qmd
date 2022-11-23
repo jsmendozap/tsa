@@ -40,7 +40,7 @@ knitr::opts_chunk$set(echo = T)
 ```{r}
 #| echo: true
 
-pacman::p_load(TSstudio, tsbox, tsoutliers, tidyverse,
+pacman::p_load(TSstudio, tsbox, tsoutliers, tidyverse, equatiomatic,
                lubridate, xts, magrittr, forecast, dygraphs)
 
 url <- 'https://gml.noaa.gov/webdata/ccgg/trends/co2/co2_mm_mlo.txt'
@@ -63,7 +63,7 @@ data <- read.csv('gmsl.csv') %>%
 rm(cov)
 
 dygraph(data, main = 'Nivel medio del mar global vs
-        Concentración de CO2 en la atmósfera') %>%
+        Concentración de CO2 en la atmósfera', height = 400) %>%
   dySeries("co2", axis = 'y2', label = 'CO2') %>%
   dySeries('gsml', label = 'GSML') %>%
   dyAxis('y', label = 'Nivel del mar (mm)') %>%
@@ -74,6 +74,7 @@ dygraph(data, main = 'Nivel medio del mar global vs
 
 ```{r}
 #| output: false
+#| echo: false
 
 ts_split(ts.obj = ts_ts(data), sample.out = 12) %T>%
   {assign(x = "train", value = .$train, envir = .GlobalEnv)} %T>%
@@ -95,7 +96,11 @@ tseries::adf.test(x = train[,'gsml'])
 ```
 :::
 
-## Modelo {.title}
+## Modelos {.title}
+
+::: {.panel-tabset}
+
+### Modelo con covariable
 
 ```{r}
 #| echo: true
@@ -110,11 +115,50 @@ modelo <- Arima(y = train[,'gsml'],
 
 modelo %>% lmtest::coeftest()
 ```
-## Modelo {.title}
+```{r}
+#| echo: false
+
+cat('AIC:', AIC(modelo))
+```
+
+
+### Modelo sin covariable
 
 ```{r}
-equatiomatic::extract_eq(modelo, wrap = T, use_coefs = T)
+mod <- Arima(y = train[,'gsml'], 
+                order = c(2,1,3),
+                include.drift = T)
+
+mod %>% lmtest::coeftest()
 ```
+
+```{r}
+#| echo: false
+
+cat('AIC:', AIC(mod))
+```
+
+### Modelo no paramétrico
+
+```{r}
+holt <- holt(y = train[,'gsml'], h = 12, initial = 'optimal')
+holt$model
+```
+:::
+
+## Modelos {.title}
+
+::: {.panel-tabset}
+
+### Modelo con convariables
+
+```{r}
+extract_eq(modelo, wrap = T, use_coefs = T)
+```
+### Modelo sin covariables
+
+$$( 1 \ - \ 0.79B \ + \ 0.09B^2) \ \cdot \ (1 - B) \ \cdot \ (y_t - 0.19t) \\ =  (1 \ - \ 0.34B \ + \ 0.2B^2 \ - \ 0.69B^3) \ \cdot \ \epsilon_t$$
+:::
 
 ## Supuestos {.title}
 
@@ -124,7 +168,7 @@ equatiomatic::extract_eq(modelo, wrap = T, use_coefs = T)
 ```{r}
 #| echo: true
 
-modelo %>%
+mod %>%
   checkresiduals(theme = theme_bw(), test = F)
 ```
 :::
@@ -133,11 +177,11 @@ modelo %>%
 ```{r}
 #| echo: true
 
-modelo %>%
+mod %>%
   residuals() %>%
   shapiro.test()
 
-modelo %>%
+mod %>%
   residuals() %>%
   Box.test(type = 'Ljung-Box')
 ```
@@ -145,15 +189,20 @@ modelo %>%
 
 :::
 
+
 ## Outliers {.title}
 
 ```{r}
 #| echo: true
 
-tso(y = train[,'gsml'], xreg = train[,'co2'])
+tso(y = train[,'gsml'], xreg = train[,'co2'], tsmethod = 'auto.arima', args.tsmethod = list(stepwise = F, approximation = F))
 ```
 
 ## Predicciones {.title}
+
+::: {.panel-tabset}
+
+### Modelo paramétrico
 
 ::: {layout="[60, 40]" layout-valign="center"}
 
@@ -171,7 +220,7 @@ serie <- prediccion %>%
 colnames(serie) <- c('gsml', 'predicho', 'lwr', 'upr')
 
 serie %>%
-  dygraph() %>%
+  dygraph(height = 350) %>%
   dySeries('gsml', label = 'Observada') %>% 
   dySeries(c('lwr', 'predicho', 'upr'), label = 'Predicho') %>%
   dyRangeSelector()
@@ -182,6 +231,39 @@ serie %>%
 
 accuracy(prediccion, test[,'gsml'])[,c(2,5)]
 ```
+:::
+
+### Modelo no paramétrico
+
+::: {layout="[60, 40]" layout-valign="center"}
+
+```{r}
+#| echo: true
+#| warning: false
+
+serie <- holt %>%
+  as_tibble() %>%
+  select(1, 4, 5) %>%
+  rename(predico = 1, lwr = 2, upr = 3) %>%
+  ts(start = c(2013, 1), end = c(2013, 12), frequency = 12) %>%
+  {cbind(data[, 'gsml'], .)}
+
+colnames(serie) <- c('gsml', 'predicho', 'lwr', 'upr')
+
+serie %>%
+  dygraph(height = 350) %>%
+  dySeries('gsml', label = 'Observada') %>% 
+  dySeries(c('lwr', 'predicho', 'upr'), label = 'Predicho') %>%
+  dyRangeSelector()
+```
+
+```{r}
+#| echo: true
+
+accuracy(holt, test[,'gsml'])[,c(2,5)]
+```
+:::
+
 :::
 
 ## Gracias {.title}

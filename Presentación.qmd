@@ -238,7 +238,6 @@ accuracy(prediccion, test[,'gsml'])[,c(2,5)]
 ::: {layout="[60, 40]" layout-valign="center"}
 
 ```{r}
-#| echo: true
 #| warning: false
 
 serie <- holt %>%
